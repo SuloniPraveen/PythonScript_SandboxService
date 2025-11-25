@@ -1,11 +1,12 @@
 FROM python:3.12-slim
 
-# Install dependencies needed to build nsjail
+# Install deps for nsjail
 RUN apt-get update && apt-get install -y \
     git \
     build-essential \
     libprotobuf-dev \
     protobuf-compiler \
+    libnl-route-3-200 \
     libnl-route-3-dev \
     libcap-dev \
     pkg-config \
@@ -14,24 +15,25 @@ RUN apt-get update && apt-get install -y \
     bison \
  && rm -rf /var/lib/apt/lists/*
 
-# Build & install nsjail
-RUN git clone https://github.com/google/nsjail.git /opt/nsjail \
- && cd /opt/nsjail \
- && make \
- && cp nsjail /usr/local/bin/nsjail \
- && rm -rf /opt/nsjail
+# ---- Build nsjail ----
+RUN git clone https://github.com/google/nsjail.git /opt/nsjail && \
+    cd /opt/nsjail && make && cp nsjail /usr/local/bin/nsjail && \
+    rm -rf /opt/nsjail
 
 WORKDIR /app
+RUN mkdir -p /runtime
 
-# Install Python deps
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy all app code & nsjail config
-COPY . ./
+COPY app.py /app/
+COPY nsjail.cfg /app/
+COPY runtime/ /runtime/
 
-# Expose port for Cloud Run / local usage
+# Cloud Run + nsjail: run as non-root
+RUN useradd -m -u 1001 appuser
+USER appuser
+
 EXPOSE 8080
 
-# Use gunicorn in container; bind to $PORT (Cloud Run) or 8080 locally
 CMD ["sh", "-c", "gunicorn -b 0.0.0.0:${PORT:-8080} app:app"]

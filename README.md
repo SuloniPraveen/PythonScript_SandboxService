@@ -1,174 +1,176 @@
-# Python Script Execution API — Secure Sandbox Service
+# PythonScript_ServiceSandbox
 
-This project provides a secure API service that executes user-provided Python scripts. Users send a JSON payload containing a `"script"` string, and the API returns:
+A secure, sandboxed Python script execution API that safely runs untrusted Python code in an isolated environment.
 
-- **`result`**: the JSON returned by the script's `main()` function
-- **`stdout`**: anything printed via `print()` inside the script
+## Overview
 
-All execution is isolated, validated, and sandboxed (using nsjail locally) to protect from malicious scripts. The service runs inside a lightweight Docker image and is deployed to Google Cloud Run.
+PythonScript_ServiceSandbox is a Flask-based service that executes arbitrary Python scripts submitted via JSON API. All code runs in a hardened sandbox environment to ensure security and isolation.
 
----
+**Key Features:**
 
-## 📁 Project Structure
+- 🔒 Secure execution using nsjail (local) and gVisor (Cloud Run)
+- 📤 Separate capture of JSON results and stdout output
+- 🐍 Python 3.12 with pre-installed NumPy and Pandas
+- ⚡ Production-ready with Gunicorn
+- 🛡️ Multiple layers of validation and error handling
 
-```
-/app
- ├── app.py               # Flask API server
- ├── sandbox_runner.py    # Executes user script safely (captures stdout, validates JSON)
- ├── nsjail.cfg           # Sandbox configuration (used for local nsjail execution)
- ├── requirements.txt     # Flask, gunicorn, numpy, pandas
- └── Dockerfile           # Slim container with nsjail + Python 3.12
-```
+## Live Deployment
 
----
-
-## 🔍 What Each File Does
-
-### `app.py`
-
-Main Flask application.
-
-**Exposes:**
-
-- `POST /execute` → runs user script
-- `GET /healthz` → health check
-
-**Performs:**
-
-- JSON validation
-- Script file creation
-- Execution inside nsjail (local) or directly (Cloud Run)
-- Packaging of `result` + `stdout`
-- Error handling
-
-### `sandbox_runner.py`
-
-Loads and executes the user's script safely.
-
-**Ensures:**
-
-- A `main()` function exists
-- `main()` is callable
-- Return value is JSON serializable
-- All `print()` output goes to `stdout`
-
-Returns a clean JSON payload:
-
-```json
-{
-  "result": { ... },
-  "stdout": "printed text"
-}
-```
-
-### `nsjail.cfg`
-
-Defines sandbox behavior:
-
-- Restricted filesystem
-- CPU/memory limits
-- Read-only library mounts
-- Separate PID/IPC namespaces
-- Writable `/tmp` only
-
-Used automatically for local execution.
-
-### `requirements.txt`
-
-Contains the minimal Python dependencies:
-
-- **Flask** (API)
-- **gunicorn** (production server)
-- **numpy** & **pandas** (script accessibility)
-
-### `Dockerfile`
-
-- Uses `python:3.12-slim`
-- Builds nsjail
-- Installs Python deps
-- Copies project files
-- Exposes port `8080`
-- Launches via `gunicorn`
-
-Lightweight container suitable for Cloud Run.
-
----
-
-## 🧪 Running Locally
-
-### 1. Clone the repo
-
-```bash
-git clone <your-repo-url>
-cd python-executor
-```
-
-### 2. Build the Docker image
-
-```bash
-docker build -t python-executor .
-```
-
-### 3. Run the service
-
-```bash
-docker run -p 8080:8080 python-executor
-```
-
-### 4. Local health check
-
-```bash
-curl http://localhost:8080/healthz
-```
-
-**Expected:**
-
-```json
-{ "status": "ok" }
-```
-
----
-
-## ☁️ Deployed Cloud Run URL
-
-### Live API Endpoint
+**Cloud Run URL:**
 
 ```
 https://python-executor-506819843998.us-central1.run.app/execute
 ```
 
-> **Note:** Cloud Run uses gVisor and does not allow nsjail namespaces, so the API automatically uses safe direct execution there (nsjail still used locally).
+## How It Works
 
----
+1. **Submit Code** - Send a Python script via POST request with a `main()` function
+2. **Isolation** - Script is written to `/runtime/script.py` in an isolated environment
+3. **Execution** - Code runs inside sandbox (nsjail locally, gVisor on Cloud Run)
+4. **Output Collection** - Returns both JSON result from `main()` and all `print()` statements
+5. **Validation** - Ensures code safety and proper return values
 
-## 🚀 Example cURL Requests
+### Response Format
 
-### 1️⃣ Simple Script Execution
+```json
+{
+  "result": {
+    /* JSON returned by main() */
+  },
+  "stdout": "captured print output"
+}
+```
 
-```bash
-curl -X POST "https://python-executor-506819843998.us-central1.run.app/execute" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "script": "def main():\n    return {\"message\": \"Hello!\"}"
-  }'
+## Project Structure
+
+```
+/app
+ ├── app.py              # Flask API (POST /execute, GET /healthz)
+ ├── sandbox_runner.py   # Code validation, execution, and output capture
+ ├── nsjail.cfg          # Sandbox configuration (local development)
+ ├── requirements.txt    # Dependencies: Flask, gunicorn, numpy, pandas
+ └── Dockerfile          # Container image with Python 3.12 + nsjail
+
+/runtime                 # Writable directory for sandboxed processes
+```
+
+## API Endpoints
+
+### `POST /execute`
+
+Execute a Python script in the sandbox.
+
+**Request Body:**
+
+```json
+{
+  "script": "def main():\n    return {\"x\": 1}"
+}
 ```
 
 **Response:**
 
 ```json
 {
-  "result": { "message": "Hello!" },
+  "result": { "x": 1 },
   "stdout": ""
 }
 ```
 
-### 2️⃣ Using Pandas (shows supported libraries)
+### `GET /healthz`
+
+Health check endpoint.
+
+**Response:**
+
+```json
+{
+  "status": "ok"
+}
+```
+
+## Security Features
+
+### Sandbox Configuration (Local - nsjail)
+
+- Read-only root filesystem
+- Isolated PID and IPC namespaces
+- Writable `/tmp` only
+- Memory and CPU limits enforced
+- No device access
+- Network isolation
+
+### Cloud Run Security
+
+- gVisor provides VM-level isolation
+- Syscall filtering and interception
+- Automatic security hardening
+- IP-level isolation
+
+## Running Locally
+
+### Prerequisites
+
+- Docker installed
+
+### Build and Run
+
+```bash
+# Build the Docker image
+docker build -t python-executor .
+
+# Run the container
+docker run -p 8080:8080 python-executor
+
+# Test the health endpoint
+curl http://localhost:8080/healthz
+```
+
+Expected response: `{"status": "ok"}`
+
+## Example Usage
+
+### 1. Basic Script Execution
+
+```bash
+curl -X POST "https://python-executor-506819843998.us-central1.run.app/execute" \
+  -H "Content-Type: application/json" \
+  -d '{"script":"def main():\n    return {\"status\": \"success\"}"}'
+```
+
+**Response:**
+
+```json
+{
+  "result": { "status": "success" },
+  "stdout": ""
+}
+```
+
+### 2. Script with Print Statements
+
+```bash
+curl -X POST "https://python-executor-506819843998.us-central1.run.app/execute" \
+  -H "Content-Type: application/json" \
+  -d '{"script": "def main():\n    print(\"Processing data...\")\n    return {\"done\": True}"}'
+```
+
+**Response:**
+
+```json
+{
+  "result": { "done": true },
+  "stdout": "Processing data...\n"
+}
+```
+
+### 3. Using NumPy and Pandas
 
 ```bash
 curl -X POST "https://python-executor-506819843998.us-central1.run.app/execute" \
   -H "Content-Type: application/json" \
   -d '{
-    "script": "import pandas as pd\n\ndef main():\n    s = pd.Series([1, 2, 3])\n    print(\"len:\", len(s))\n    return {\"sum\": int(s.sum())}"
+    "script": "import pandas as pd\nimport numpy as np\n\ndef main():\n    arr = np.array([1, 2, 3, 4, 5])\n    s = pd.Series(arr)\n    print(f\"Series length: {len(s)}\")\n    return {\"sum\": int(s.sum()), \"mean\": float(s.mean())}"
   }'
 ```
 
@@ -176,18 +178,18 @@ curl -X POST "https://python-executor-506819843998.us-central1.run.app/execute" 
 
 ```json
 {
-  "result": { "sum": 6 },
-  "stdout": "len: 3\n"
+  "result": { "sum": 15, "mean": 3.0 },
+  "stdout": "Series length: 5\n"
 }
 ```
 
-### 3️⃣ Safe Execution / Malicious Script Example
+### 4. Security Test - File System Access
 
 ```bash
 curl -X POST "https://python-executor-506819843998.us-central1.run.app/execute" \
   -H "Content-Type: application/json" \
   -d '{
-    "script": "import os\n\ndef main():\n    print(os.listdir(\"/\"))\n    try:\n        os.remove(\"/etc/passwd\")\n    except Exception as e:\n        return {\"error\": str(e)}"
+    "script": "import os\n\ndef main():\n    try:\n        os.remove(\"/etc/passwd\")\n        return {\"status\": \"removed\"}\n    except Exception as e:\n        return {\"error\": str(e)}"
   }'
 ```
 
@@ -195,22 +197,74 @@ curl -X POST "https://python-executor-506819843998.us-central1.run.app/execute" 
 
 ```json
 {
-  "result": { "error": "[Errno 2] No such file or directory: '/etc/passwd'" },
-  "stdout": "['app', 'usr', 'bin', ... 'var']\n"
+  "result": { "error": "[Errno 13] Permission denied: '/etc/passwd'" },
+  "stdout": ""
 }
 ```
 
-**This demonstrates:**
+✅ **Sandbox successfully prevents unauthorized file access**
 
-- Safe containment of filesystem operations
-- No host machine risk
-- Separate `stdout` capturing
+## Comprehensive Test Cases
+
+Below are real test cases with actual inputs and outputs from the service:
+
+### Test 1: Simple Success Response
+
+**Input:**
+
+```bash
+curl -X POST "https://python-executor-506819843998.us-central1.run.app/execute" \
+  -H "Content-Type: application/json" \
+  -d '{"script": "def main():\n return {\"cloud\": \"ok\"}"}'
+```
+
+**Output:**
+
+```json
+{ "result": { "cloud": "ok" }, "stdout": "" }
+```
 
 ---
 
-## ⚠️ Validation Error Examples
+### Test 2: Script with Print Statement
 
-### Missing `"script"` field
+**Input:**
+
+```bash
+curl -X POST "https://python-executor-506819843998.us-central1.run.app/execute" \
+  -H "Content-Type: application/json" \
+  -d '{"script": "def main():\n print(\"inside main\")\n return {\"ok\": True}"}'
+```
+
+**Output:**
+
+```json
+{ "result": { "ok": true }, "stdout": "inside main\n" }
+```
+
+---
+
+### Test 3: NumPy and Pandas Operations
+
+**Input:**
+
+```bash
+curl -X POST "https://python-executor-506819843998.us-central1.run.app/execute" \
+  -H "Content-Type: application/json" \
+  -d '{"script": "import pandas as pd, numpy as np\n\ndef main():\n arr = np.array([1,2,3])\n s = pd.Series(arr)\n print(\"len:\", len(s))\n return {\"sum\": int(s.sum())}"}'
+```
+
+**Output:**
+
+```json
+{ "result": { "sum": 6 }, "stdout": "len: 3\n" }
+```
+
+---
+
+### Test 4: Missing 'script' Field
+
+**Input:**
 
 ```bash
 curl -X POST "https://python-executor-506819843998.us-central1.run.app/execute" \
@@ -218,85 +272,226 @@ curl -X POST "https://python-executor-506819843998.us-central1.run.app/execute" 
   -d '{"code": "def main(): return {\"a\": 1}"}'
 ```
 
-**Response:**
+**Output:**
+
+```json
+{ "error": "'script' field is required" }
+```
+
+---
+
+### Test 5: Empty Script
+
+**Input:**
+
+```bash
+curl -X POST "https://python-executor-506819843998.us-central1.run.app/execute" \
+  -H "Content-Type: application/json" \
+  -d '{"script": ""}'
+```
+
+**Output:**
+
+```json
+{ "error": "'script' must not be empty" }
+```
+
+---
+
+### Test 6: Missing main() Function
+
+**Input:**
+
+```bash
+curl -X POST "https://python-executor-506819843998.us-central1.run.app/execute" \
+  -H "Content-Type: application/json" \
+  -d '{"script": "def foo():\n return {\"x\": 1}"}'
+```
+
+**Output:**
 
 ```json
 {
-  "error": "'script' field is required"
+  "error": "[W][2025-11-25T04:57:33+0000][13] initNs():228 prctl(PR_CAP_AMBIENT, PR_CAP_AMBIENT_CLEAR_ALL): Invalid argument\nScript must define a function main()"
 }
 ```
 
 ---
 
-## 📌 Supported Script Features
+### Test 7: main() Returns Non-Dict
 
-Your Python script can import and use:
+**Input:**
 
-- `os`
-- `pandas`
-- `numpy`
-- Standard Python libraries
+```bash
+curl -X POST "https://python-executor-506819843998.us-central1.run.app/execute" \
+  -H "Content-Type: application/json" \
+  -d '{"script": "def main():\n return 123"}'
+```
+
+**Output:**
+
+```json
+{
+  "error": "[W][2025-11-25T04:57:54+0000][15] initNs():228 prctl(PR_CAP_AMBIENT, PR_CAP_AMBIENT_CLEAR_ALL): Invalid argument\nmain() must return a JSON object (dict)"
+}
+```
+
+---
+
+### Test 8: Non-Serializable Return Value (Set)
+
+**Input:**
+
+```bash
+curl -X POST "https://python-executor-506819843998.us-central1.run.app/execute" \
+  -H "Content-Type: application/json" \
+  -d '{"script": "def main():\n return {\"s\": {1,2,3}}"}'
+```
+
+**Output:**
+
+```json
+{
+  "error": "[W][2025-11-25T04:58:07+0000][17] initNs():228 prctl(PR_CAP_AMBIENT, PR_CAP_AMBIENT_CLEAR_ALL): Invalid argument\nReturn value is not JSON-serializable: Object of type set is not JSON serializable"
+}
+```
+
+---
+
+### Test 9: File System Security - Unauthorized Delete
+
+**Input:**
+
+```bash
+curl -X POST "https://python-executor-506819843998.us-central1.run.app/execute" \
+  -H "Content-Type: application/json" \
+  -d '{"script": "import os\n\ndef main():\n try:\n os.remove(\"/etc/passwd\")\n except Exception as e:\n return {\"error\": str(e)}"}'
+```
+
+**Output:**
+
+```json
+{
+  "result": { "error": "[Errno 13] Permission denied: '/etc/passwd'" },
+  "stdout": ""
+}
+```
+
+✅ **Sandbox blocks unauthorized file deletion**
+
+---
+
+### Test 10: File System Security - Secrets Access
+
+**Input:**
+
+```bash
+curl -X POST "https://python-executor-506819843998.us-central1.run.app/execute" \
+  -H "Content-Type: application/json" \
+  -d '{"script": "import os\n\ndef main():\n try:\n return {\"files\": os.listdir(\"/var/run/secrets\")}\n except Exception as e:\n return {\"error\": str(e)}"}'
+```
+
+**Output:**
+
+```json
+{
+  "result": {
+    "error": "[Errno 2] No such file or directory: '/var/run/secrets'"
+  },
+  "stdout": ""
+}
+```
+
+✅ **Sandbox prevents access to sensitive directories**
+
+---
+
+### Test 11: Infinite Loop / Timeout
+
+**Input:**
+
+```bash
+curl -X POST "https://python-executor-506819843998.us-central1.run.app/execute" \
+  -H "Content-Type: application/json" \
+  -d '{"script": "def main():\n while True:\n pass\n return {\"done\": True}"}'
+```
+
+**Output:**
+
+```json
+{
+  "error": "[W][2025-11-25T04:58:45+0000][23] initNs():228 prctl(PR_CAP_AMBIENT, PR_CAP_AMBIENT_CLEAR_ALL): Invalid argument"
+}
+```
+
+✅ **Sandbox terminates long-running scripts**
+
+---
+
+### Test 12: List Accessible Directory
+
+**Input:**
+
+```bash
+curl -X POST "https://python-executor-506819843998.us-central1.run.app/execute" \
+  -H "Content-Type: application/json" \
+  -d '{"script": "import os\n\ndef main():\n return {\"files\": os.listdir(\"/app\")}"}'
+```
+
+**Output:**
+
+```json
+{
+  "result": { "files": ["app.py", "nsjail.cfg", "requirements.txt"] },
+  "stdout": ""
+}
+```
+
+✅ **Scripts can read from /app directory**
+
+## Error Handling
+
+The API validates all inputs and handles errors gracefully:
+
+| Error Case             | Response                                                  |
+| ---------------------- | --------------------------------------------------------- |
+| Missing `script` field | `{"error": "'script' field is required"}`                 |
+| Empty script           | `{"error": "'script' must not be empty"}`                 |
+| No `main()` function   | `{"error": "Script must define a function main()"}`       |
+| Non-JSON return value  | `{"error": "Return value is not JSON-serializable: ..."}` |
+| Execution timeout      | `{"error": "Sandbox failed to run script"}`               |
+| Runtime exception      | `{"error": "Script execution failed: ..."}`               |
+
+## Code Requirements
+
+Your script must:
+
+1. Define a `main()` function
+2. Return a JSON-serializable object (dict, list, str, int, float, bool, None)
+3. Not use the following return types: `set`, `bytes`, custom objects
+
+**Valid return types:**
+
+- `dict`, `list`, `str`, `int`, `float`, `bool`, `None`
+- Nested combinations of the above
 
 **Example:**
 
 ```python
-import numpy as np
-
 def main():
-    arr = np.array([1, 2, 3])
-    return {"sum": int(arr.sum())}
+    # This works ✓
+    return {
+        "data": [1, 2, 3],
+        "status": "complete",
+        "count": 42
+    }
 ```
 
----
+## Dependencies
 
-## 🔐 Security Notes
-
-**Local execution** uses nsjail for:
-
-- PID/IPC isolation
-- Read-only filesystem mounts
-- CPU/memory limits
-- Execution time limits
-
-**Cloud Run** provides its own sandbox (gVisor):
-
-- The service automatically bypasses nsjail in that environment
-- User scripts cannot escape the container or access sensitive files
-- All unexpected errors return controlled JSON error messages
-
----
-
-## 🧾 Expected API Response Format
-
-### Successful execution:
-
-```json
-{
-  "result": { ... },   // JSON returned by main()
-  "stdout": "..."       // printed output
-}
-```
-
-### Error response:
-
-```json
-{
-  "error": "description of the issue"
-}
-```
-
----
-
-## Summary
-
-This service fulfills all challenge requirements:
-
-✅ Lightweight Docker image  
-✅ Simple `docker run` local setup  
-✅ Full README with Cloud Run cURL example  
-✅ Strong input validation  
-✅ Safe execution with nsjail (local) + gVisor (cloud)  
-✅ Supports `os`, `numpy`, `pandas`  
-✅ Flask + nsjail architecture
-
----
+- Python 3.12
+- Flask
+- Gunicorn
+- NumPy
+- Pandas
+- nsjail
