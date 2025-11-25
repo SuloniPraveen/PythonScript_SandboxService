@@ -287,7 +287,7 @@ def main():
 
 ---
 
-## 🎉 Summary
+## Summary
 
 This service fulfills all challenge requirements:
 
