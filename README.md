@@ -479,7 +479,7 @@ Your script must:
 
 ```python
 def main():
-    # This works ✓
+    
     return {
         "data": [1, 2, 3],
         "status": "complete",
